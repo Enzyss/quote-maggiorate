@@ -1,8 +1,8 @@
 from telethon.sync import TelegramClient
 from telethon.tl.types import InputMessagesFilterPhotos
-import pytesseract
-from PIL import Image
-from io import BytesIO
+#import pytesseract
+#from PIL import Image
+#from io import BytesIO
 import re
 
 api_id = '3778637'
