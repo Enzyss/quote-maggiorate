@@ -1,13 +1,15 @@
-from quart import Quart, render_template, request
+from fastapi import FastAPI, Form, Request, HTTPException
+from fastapi.responses import HTMLResponse
 from telethon.sync import TelegramClient
 import asyncio
+from telethon.errors import SessionPasswordNeededError
 
 API_ID = '3778637'
 API_HASH = '27b204b5e5a74a77ec977f9cc951ae0b'
 PHONE_NUMBER = '+393342033166'
 CODE_HASH = ''
 
-app = Quart(__name__)
+app = FastAPI()
 telegram_code_sent = False
 
 async def send_telegram_code():
@@ -17,11 +19,7 @@ async def send_telegram_code():
         await client.connect()
         if await client.is_user_authorized():
             print("Sei già autorizzato!")
-            #print('await client.get_me(): ' , client.get_me())
-
             dialogs = await client.get_dialogs()
-            
-            # Stampare l'ID di ogni chat
             for dialog in dialogs:
                 chat = dialog.entity
                 if hasattr(chat, 'title'):
@@ -30,35 +28,46 @@ async def send_telegram_code():
                         messages = await client.get_messages(chat.id, limit=10)
                         for message in messages:
                             print("Messaggio:", message.text)
-                # Scarica le immagini dal canale
-
         else:
-        
-            phone_code = await client.send_code_request(PHONE_NUMBER)
-            global CODE_HASH
-            CODE_HASH = phone_code.phone_code_hash
-            print('SMS INVIATO: ' , CODE_HASH)
+            try:
+                await client.send_code_request(PHONE_NUMBER)
+                global CODE_HASH
+                CODE_HASH = await client.get_input("Inserisci il codice ricevuto tramite SMS: ")
+                print('SMS INVIATO: ', CODE_HASH)
+            except SessionPasswordNeededError:
+                print("È richiesta una password di sessione.")
 
         telegram_code_sent = True
 
-@app.route('/')
-async def index():
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
     await send_telegram_code()
-    return await render_template('index.html')
+    return """
+    <html>
+        <head>
+            <title>Telegram Authentication</title>
+        </head>
+        <body>
+            <form action="/verify" method="post">
+                <label for="phone_code">Inserisci il codice ricevuto tramite SMS:</label><br>
+                <input type="text" id="phone_code" name="phone_code"><br>
+                <input type="submit" value="Invia">
+            </form>
+        </body>
+    </html>
+    """
 
-@app.route('/verify', methods=['POST'])
-async def verify():
-    phone_code = (await request.form)['phone_code']
-    print(phone_code)
+@app.post("/verify")
+async def verify(request: Request, phone_code: str = Form(...)):
     if phone_code:
-        # Autenticazione con il codice inserito
         client = TelegramClient("session", API_ID, API_HASH)
         await client.connect()
-        print('phone_code_hash: ' , CODE_HASH)
-        await client.sign_in(PHONE_NUMBER, code=phone_code,phone_code_hash=CODE_HASH)
-                # Ora l'utente è autorizzato, puoi eseguire qui la logica successiva
-        print('await client.get_me(): ' , await client.get_me())
-    return 'Codice verificato con successo!'
+        await client.sign_in(PHONE_NUMBER, code=phone_code, phone_code_hash=CODE_HASH)
+        me = await client.get_me()
+        return f"Autenticato come {me.first_name} {me.last_name}"
+    else:
+        raise HTTPException(status_code=400, detail="Codice non valido")
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0")
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0")
